@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#14110f">
+<title>Laundry Sorter — Hands-free</title>
+<style>
+:root{--bg:#14110f;--panel:#1f1a17;--ink:#f6f1ea;--muted:#a59a8f;--line:#332b26;--accent:#3aa197}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,system-ui,"Segoe UI",Roboto,sans-serif;height:100%}
+body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+button{font:inherit;border:0;border-radius:14px;cursor:pointer;color:inherit}
+input,select{font:inherit;font-size:16px;padding:11px;border-radius:12px;border:1px solid var(--line);background:#120f0d;color:var(--ink);width:100%}
+.hidden{display:none!important}
+.wrap{max-width:560px;margin:0 auto;padding:14px}
+h1{font-size:22px;margin:6px 0}
+h2{font-size:15px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:18px 0 8px}
+p,.muted{color:var(--muted);font-size:14px;line-height:1.45}
+.btn{background:var(--accent);color:#fff;font-weight:800;padding:14px 16px;font-size:17px;width:100%}
+.btn.ghost{background:#2a2420;color:var(--ink)}
+.btn.small{width:auto;padding:9px 12px;font-size:14px}
+.card{background:var(--panel);border-radius:16px;padding:14px;margin:10px 0}
+.row{display:flex;gap:8px;align-items:center}
+.between{justify-content:space-between}
+label.f{display:block;font-size:13px;font-weight:700;color:var(--muted);margin:10px 0 4px}
+a{color:#7fd3ca}
+
+/* live screen */
+#live{position:fixed;inset:0;display:flex;flex-direction:column;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+.stage{position:relative;flex:1;min-height:0;background:#000;overflow:hidden}
+.stage video{width:100%;height:100%;object-fit:cover}
+.pill{position:absolute;top:10px;left:10px;background:rgba(0,0,0,.6);padding:7px 11px;border-radius:999px;font-weight:800;font-size:14px;display:flex;align-items:center;gap:7px}
+.pill .d{width:10px;height:10px;border-radius:50%;background:#888}
+.pill.watch .d{background:#3aa197}.pill.look .d{background:#f0b429;animation:bl 1s infinite}.pill.pause .d{background:#888}
+@keyframes bl{50%{opacity:.3}}
+.cost{position:absolute;top:10px;right:10px;background:rgba(0,0,0,.6);padding:7px 11px;border-radius:999px;font-size:13px;font-weight:700}
+.mic{position:absolute;top:50px;left:10px;background:rgba(0,0,0,.6);padding:6px 10px;border-radius:999px;font-size:12px;font-weight:700}
+.mic.on{color:#ff8fb1}
+.motion{position:absolute;left:10px;right:10px;bottom:10px;height:4px;background:rgba(255,255,255,.15);border-radius:4px;overflow:hidden}
+.motion i{display:block;height:100%;width:0;background:#fff;opacity:.7;transition:width .1s}
+.banner{padding:16px 16px 14px;min-height:118px;transition:background .2s}
+.banner .who{font-size:44px;font-weight:900;line-height:1;letter-spacing:-.5px}
+.banner .sub{font-size:15px;margin-top:6px;opacity:.92}
+.banner .tag{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;opacity:.85;margin-bottom:4px}
+.banner.unsure{background:#3a2c12!important;color:#ffd58a}
+.heard{font-size:13px;color:var(--muted);padding:6px 16px;min-height:26px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.strip{display:flex;gap:6px;overflow-x:auto;padding:0 12px 8px}
+.strip div{flex:0 0 auto;width:54px;font-size:10px;font-weight:700;text-align:center}
+.strip img{width:54px;height:54px;object-fit:cover;border-radius:10px;border:3px solid}
+.controls{display:flex;gap:8px;padding:6px 12px 10px}
+.controls button{flex:1;background:#2a2420;padding:12px 6px;font-weight:800;font-size:14px}
+.piles{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:0 12px 10px}
+.piles button{color:#fff;font-weight:800;font-size:12px;padding:9px 4px;border-radius:10px}
+.helpbox{font-size:13px;color:var(--muted);line-height:1.6}
+.helpbox b{color:var(--ink)}
+.fam{display:grid;grid-template-columns:20px 1fr;gap:8px;margin:8px 0;align-items:start}
+.fam .sw{width:20px;height:20px;border-radius:6px;margin-top:12px}
+.fam input{padding:8px 10px;font-size:15px;margin-bottom:4px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.grid div{font-size:10px;text-align:center}
+.grid img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border-bottom:4px solid}
+</style>
+</head>
+<body>
+
+<!-- SETUP / SETTINGS -->
+<div id="setup" class="wrap hidden">
+  <h1>Laundry Sorter</h1>
+  <p>Hands-free: prop your phone up facing where you fold. Hold up each item — it says the pile out loud and listens for corrections.</p>
+
+  <div class="card">
+    <h2 style="margin-top:0">Anthropic API key</h2>
+    <input id="keyIn" type="password" placeholder="sk-ant-…" autocomplete="off">
+    <p style="margin-bottom:0">Stays on this phone only. Get one at <a href="https://platform.claude.com/settings/keys" target="_blank" rel="noopener">platform.claude.com</a> — and set a monthly spend limit there so it can never surprise you.</p>
+    <label class="f">Model</label>
+    <select id="modelIn">
+      <option value="claude-haiku-5-5">Haiku 5.5 — cheapest (≈ $1–2 per 1,000 items)</option>
+      <option value="claude-sonnet-5-5">Sonnet 5.5 — smarter (≈ $10–30 per 1,000 items)</option>
+    </select>
+    <label class="row" style="margin-top:10px;font-size:14px;gap:10px"><input id="escIn" type="checkbox" style="width:auto"> Ask Sonnet only when Haiku is unsure</label>
+    <label class="f">Detection sensitivity</label>
+    <input id="sensIn" type="range" min="1" max="10" value="5" style="padding:0">
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0">Piles</h2>
+    <p style="margin:0">Rename to your kids' names if you like — then you can say their names out loud.</p>
+    <div id="famList"></div>
+  </div>
+
+  <button class="btn" id="startBtn">Start sorting</button>
+  <p id="setupErr" style="color:#ff9b8a"></p>
+
+  <div class="card helpbox">
+    <h2 style="margin-top:0">What to say</h2>
+    <b>"Yes"</b> — confirm a guess it wasn't sure about<br>
+    <b>"Dad" / "Girl six" / a name</b> — that's whose it is (fixes the last item too)<br>
+    <b>"Size 7"</b> — read the tag when it asks<br>
+    <b>"Next"</b> — look at what I'm holding now<br>
+    <b>"Undo" · "Repeat" · "Skip"</b><br>
+    <b>"Mostly girl four and girl six"</b> — who's in this load<br>
+    <b>"New load" · "Pause" · "Resume"</b><br>
+    <b>"Empty"</b> — re-learn the empty table
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0">Closet it knows · <span id="nItems">0</span> items</h2>
+    <div class="grid" id="closetGrid"></div>
+    <div class="row" style="margin-top:12px;flex-wrap:wrap">
+      <button class="btn ghost small" id="exportBtn">Back up / share</button>
+      <label class="btn ghost small" style="cursor:pointer">Restore from file<input type="file" id="importIn" accept="application/json" class="hidden"></label>
+      <button class="btn ghost small" id="wipeBtn">Forget everything</button>
+    </div>
+    <p>A backup file lets Christa load the same closet on her phone.</p>
+  </div>
+  <p class="muted" id="spendLine"></p>
+</div>
+
+<!-- LIVE -->
+<div id="live" class="hidden">
+  <div class="stage">
+    <video id="vid" playsinline muted autoplay></video>
+    <div class="pill watch" id="pill"><span class="d"></span><span id="pillTxt">Watching</span></div>
+    <div class="mic" id="mic">🎙 off</div>
+    <div class="cost" id="cost">$0.00</div>
+    <div class="motion"><i id="motionBar"></i></div>
+  </div>
+  <div class="banner" id="banner" style="background:#1f1a17"><div class="tag" id="bTag">Ready</div><div class="who" id="bWho">Hold up an item</div><div class="sub" id="bSub">It looks when the item holds still.</div></div>
+  <div class="heard" id="heard"></div>
+  <div class="strip" id="strip"></div>
+  <div class="controls">
+    <button id="scanBtn">Look now</button><button id="undoBtn">Undo</button><button id="pauseBtn">Pause</button><button id="setBtn">⚙︎</button>
+  </div>
+  <div class="piles" id="pileBtns"></div>
+</div>
+
+<canvas id="cv" class="hidden"></canvas>
+
+<script>
+"use strict";
+// ================= config =================
+const PRICES = { // USD per million tokens
+  "claude-haiku-5-5": {in:0.10, out:0.50, cw:0.125, cr:0.01},
+  "claude-sonnet-5-5": {in:2, out:10, cw:2.5, cr:0.10},
+};
+const DEFAULT_PEOPLE = [
+  {id:"mom", name:"Mom", color:"#c2416b", notes:"Adult woman. Women's sizes (XS–XL, 0–16), bras, women's cuts."},
+  {id:"dad", name:"Dad", color:"#3b6bc2", notes:"Adult man. Men's sizes (S–XXL), men's cuts, boxers/briefs."},
+  {id:"g10", name:"Girl ten", color:"#0f8b8d", notes:"Girl age 10, about average size. Girls 10–12 / youth M–L."},
+  {id:"g8", name:"Girl eight", color:"#7b4fb8", notes:"Girl age 8, slightly SMALL for her age. Girls 7–8 / youth S."},
+  {id:"g6", name:"Girl six", color:"#d68a00", notes:"Girl age 6, a bit TALL for her age. Girls 6X–7 / youth XS–S. Overlaps with the 8-year-old — ask for the size when it could be either."},
+  {id:"g4", name:"Girl four", color:"#e0679a", notes:"Girl age 4, about average. 4T–5."},
+  {id:"b2", name:"Boy two", color:"#3f9142", notes:"Boy age 2, the only boy. 2T–3T, toddler boys' styles."},
+];
+
+// ================= state =================
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const LS = {
+  get(k, d){ try{ const v = localStorage.getItem(k); return v==null ? d : JSON.parse(v); }catch(e){ return d; } },
+  set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} },
+};
+const S = {
+  key: LS.get("key", ""), model: LS.get("model", "claude-haiku-5-5"), escalate: LS.get("escalate", false),
+  sens: LS.get("sens", 5),
+  people: LS.get("people", DEFAULT_PEOPLE),
+  items: [],
+  load: LS.get("load", {counts:{}, mostly:[], recent:[]}),
+  spend: LS.get("spend", {}),           // { "2026-11": 0.123 }
+  running:false, paused:false,
+  busy:false,                            // waiting on Claude
+  pending:null,                          // unsure item waiting for an answer
+  last:null,                             // last committed entry (for corrections/undo)
+  lastSpoken:"",
+};
+const person = id => S.people.find(p=>p.id===id);
+const pname = id => person(id)?.name || id;
+const pcolor = id => person(id)?.color || "#555";
+const uid = () => "i" + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+const monthKey = () => new Date().toISOString().slice(0,7);
+
+// ================= IndexedDB =================
+let idb;
+function openDB(){
+  return new Promise((res, rej)=>{
+    const r = indexedDB.open("laundry", 1);
+    r.onupgradeneeded = () => r.result.createObjectStore("items", {keyPath:"id"});
+    r.onsuccess = () => { idb = r.result; res(); };
+    r.onerror = () => rej(r.error);
+  });
+}
+function tx(mode){ return idb.transaction("items", mode).objectStore("items"); }
+const dbAll = () => new Promise((res)=>{ const r = tx("readonly").getAll(); r.onsuccess = ()=>res(r.result||[]); r.onerror = ()=>res([]); });
+const dbPut = it => new Promise((res)=>{ const r = tx("readwrite").put(it); r.onsuccess = r.onerror = ()=>res(); });
+const dbDel = id => new Promise((res)=>{ const r = tx("readwrite").delete(id); r.onsuccess = r.onerror = ()=>res(); });
+async function putItem(it){ const i = S.items.findIndex(x=>x.id===it.id); if(i>=0) S.items[i]=it; else S.items.push(it); await dbPut(it); }
+async function delItem(id){ S.items = S.items.filter(x=>x.id!==id); await dbDel(id); }
+
+// ================= speech out =================
+let speakingUntil = 0, voice = null, holdMic = false;
+const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform==="MacIntel" && navigator.maxTouchPoints > 1);
+function pickVoice(){
+  const vs = speechSynthesis.getVoices();
+  voice = vs.find(v=>/en-US/i.test(v.lang) && /samantha|google us|aria|jenny|ava/i.test(v.name)) || vs.find(v=>/^en/i.test(v.lang)) || null;
+}
+if("speechSynthesis" in window){ pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
+function say(text){
+  if(!text || !("speechSynthesis" in window)) return;
+  S.lastSpoken = text;
+  try{
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    if(voice) u.voice = voice;
+    u.rate = 1.08; u.lang = "en-US";
+    speakingUntil = Date.now() + 600 + text.length * 75;
+    // iPhones route speech quietly while the mic is open, so pause listening while talking
+    if(IS_IOS && recActive){ holdMic = true; try{ rec.abort(); }catch(e){} }
+    u.onend = u.onerror = () => { speakingUntil = Date.now() + 500; if(holdMic){ holdMic = false; if(listenWanted && S.running) setTimeout(()=>{ try{ rec.start(); }catch(e){} }, 250); } };
+    speechSynthesis.speak(u);
+  }catch(e){}
+}
+
+// ================= speech in =================
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, listenWanted = false, recActive = false;
+function startListening(){
+  if(!SR){ setMic("🎙 not supported — use buttons"); return; }
+  listenWanted = true;
+  if(!rec){
+    rec = new SR();
+    rec.continuous = true; rec.interimResults = false; rec.lang = "en-US"; rec.maxAlternatives = 1;
+    rec.onstart = () => { recActive = true; setMic("🎙 listening", true); };
+    rec.onresult = e => {
+      for(let i = e.resultIndex; i < e.results.length; i++){
+        if(e.results[i].isFinal) onHeard(e.results[i][0].transcript);
+      }
+    };
+    rec.onerror = e => {
+      if(e.error==="not-allowed" || e.error==="service-not-allowed"){ listenWanted = false; setMic("🎙 blocked — allow the microphone"); }
+    };
+    rec.onend = () => { recActive = false; setMic(holdMic ? "🎙 (talking)" : "🎙 …"); if(listenWanted && S.running && !holdMic) setTimeout(()=>{ try{ rec.start(); }catch(e){} }, 300); };
+  }
+  try{ rec.start(); }catch(e){}
+}
+function stopListening(){ listenWanted = false; try{ rec && rec.stop(); }catch(e){} setMic("🎙 off"); }
+function setMic(t, on){ const m = $("#mic"); m.textContent = t; m.classList.toggle("on", !!on); }
+
+function similar(a, b){
+  const wa = new Set(a.toLowerCase().match(/[a-z0-9]+/g)||[]), wb = new Set(b.toLowerCase().match(/[a-z0-9]+/g)||[]);
+  if(!wa.size) return true;
+  let n = 0; wa.forEach(w=>{ if(wb.has(w)) n++; });
+  return n / wa.size > 0.7;
+}
+function onHeard(raw){
+  const text = raw.trim(); if(!text) return;
+  // Ignore our own voice coming back through the mic
+  // Ignore our own voice coming back through the mic: a long phrase matching what we just said,
+  // or an exact repeat of it while we're still talking. Short answers ("girl eight") always count.
+  const words = (text.match(/[a-z0-9']+/gi)||[]).length;
+  const normT = text.toLowerCase().replace(/[^a-z0-9 ]/g,"").trim(), normS = S.lastSpoken.toLowerCase().replace(/[^a-z0-9 ]/g,"").trim();
+  if(words >= 4 && similar(text, S.lastSpoken)) return;
+  if(Date.now() < speakingUntil && normT === normS) return;
+  $("#heard").textContent = "Heard: “" + text + "”";
+  handleCommand(text);
+}
+
+const WORDNUM = {one:"1",two:"2",three:"3",four:"4",five:"5",six:"6",seven:"7",eight:"8",ten:"10",twelve:"12",fourteen:"14",sixteen:"16",eighteen:"18"};
+function pileFromWords(t){
+  for(const p of S.people){
+    const n = p.name.toLowerCase().replace(/[^a-z0-9 ]/g," ").replace(/\s+/g," ").trim();
+    if(n && (" "+t+" ").includes(" "+n+" ")) return p.id;
+  }
+  // first names alone ("Abigail"), or common words
+  for(const p of S.people){ const first = p.name.toLowerCase().split(/\s+/)[0]; if(first.length > 3 && !/^(girl|boy)$/.test(first) && new RegExp("\\b"+first+"\\b").test(t)) return p.id; }
+  if(/\b(mom|mom's|moms|mommy|mother|wife|christa)\b/.test(t)) return "mom";
+  if(/\b(dad|dad's|dads|daddy|father|husband|mine)\b/.test(t)) return "dad";
+  if(/\b(boy|boy's|baby|toddler|son)\b/.test(t)) return "b2";
+  if(/\b(ten|10)\b/.test(t)) return "g10";
+  if(/\b(eight|8)\b/.test(t)) return "g8";
+  if(/\b(six|6)\b/.test(t)) return "g6";
+  if(/\b(four|4|for)\b/.test(t) && /\b(girl|four|4)\b/.test(t)) return "g4";
+  if(/\b(two|2)\b/.test(t)) return "b2";
+  return null;
+}
+function handleCommand(raw){
+  const t = raw.toLowerCase().replace(/[.,!?]/g, " ").replace(/\s+/g, " ").trim();
+  if(/\b(pause|stop watching|hold on|wait)\b/.test(t)){ setPaused(true); return; }
+  if(/\b(resume|unpause|keep going|start again|continue)\b/.test(t)){ setPaused(false); return; }
+  if(/\bnew load\b/.test(t)){ newLoad(); return; }
+  if(/\b(undo|go back)\b/.test(t)){ undo(); return; }
+  if(/\b(repeat|say again|say that again|what did you say|what was that)\b/.test(t)){ say(S.lastSpoken || "Nothing yet."); return; }
+  if(/\b(empty|background|clear table)\b/.test(t)){ setBackground(); say("Got the empty spot."); return; }
+  if(/\bmostly\b/.test(t)){
+    const ids = []; for(const part of t.split(/\band\b|,/)){ const p = pileFromWords(part); if(p && !ids.includes(p)) ids.push(p); }
+    S.load.mostly = ids; LS.set("load", S.load);
+    say(ids.length ? "OK. Mostly " + ids.map(pname).join(" and ") + "." : "Sorry, who?"); return;
+  }
+  if(/\b(skip)\b/.test(t)){ if(S.pending){ S.pending = null; showIdle("Skipped"); say("Skipped."); } return; }
+  if(/\b(next|look|scan|check this|what about this|this one|go)\b/.test(t) && !pileFromWords(t)){ forceCapture(); return; }
+
+  let m = t.match(/\bsize (?:is )?([a-z0-9\/\-]+)(?: ?(t|x))?\b/);
+  if(m){
+    let sz = WORDNUM[m[1]] || m[1]; if(m[2]) sz += m[2];
+    sz = sz.toUpperCase();
+    if(S.pending){ S.pending.size = sz; say("Size " + sz + ". Checking."); identify(S.pending); }
+    else if(S.last){ setLastSize(sz); say("Saved size " + sz + "."); }
+    return;
+  }
+  if(/\b(yes|yep|yeah|correct|right|ok|okay|good|that's right)\b/.test(t) && !pileFromWords(t)){
+    if(S.pending){ const top = S.pending.result?.ranking?.[0]; if(top) commitPending(top.pile); }
+    return;
+  }
+  const pile = pileFromWords(t);
+  if(pile){
+    if(S.pending) commitPending(pile);
+    else if(S.last) correctLast(pile);
+  }
+}
+
+// ================= camera & detection =================
+const vid = $("#vid");
+const ANA_W = 64, ANA_H = 48;
+const ana = document.createElement("canvas"); ana.width = ANA_W; ana.height = ANA_H;
+const actx = ana.getContext("2d", {willReadFrequently:true});
+let prevSig = null, bgSig = null, lastCapSig = null, stableSince = 0, armed = true, loopTimer = null, sawMotion = true;
+
+async function startCamera(){
+  const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"}, width:{ideal:1280}, height:{ideal:960}}, audio:false});
+  vid.srcObject = stream;
+  await vid.play().catch(()=>{});
+  await new Promise(r=>{ if(vid.videoWidth) r(); else vid.onloadedmetadata = r; setTimeout(r, 3000); });
+}
+function sig(){
+  actx.drawImage(vid, 0, 0, ANA_W, ANA_H);
+  return actx.getImageData(0, 0, ANA_W, ANA_H).data.slice();
+}
+// Fraction of the picture (0–1) whose color changed noticeably
+function diff(a, b){
+  if(!a || !b) return 1;
+  let n = 0, tot = 0;
+  for(let i=0; i<a.length; i+=4){
+    const d = Math.max(Math.abs(a[i]-b[i]), Math.abs(a[i+1]-b[i+1]), Math.abs(a[i+2]-b[i+2]));
+    if(d > 28) n++; tot++;
+  }
+  return n / tot;
+}
+function thresholds(){
+  const k = (11 - S.sens) / 6;   // sensitivity 5 -> 1.0, 10 -> 0.17, 1 -> 1.67
+  return {motion: 0.035 * k + 0.01, change: 0.10 * k + 0.03, stableMs: 500 + (10 - S.sens) * 40};
+}
+function setBackground(){ bgSig = sig(); lastCapSig = bgSig; }
+function tick(){
+  if(!S.running || !vid.videoWidth) return;
+  const cur = sig();
+  const th = thresholds();
+  const m = diff(cur, prevSig);
+  prevSig = cur;
+  $("#motionBar").style.width = Math.min(100, m * 400) + "%";
+  if(S.paused) return;
+  const now = Date.now();
+  if(m > th.motion){ stableSince = now; sawMotion = true; return; }
+  if(!stableSince) stableSince = now;
+  if(now - stableSince < th.stableMs) return;
+  if(S.busy || !sawMotion) return;
+  const vsLast = diff(cur, lastCapSig), vsBg = bgSig ? diff(cur, bgSig) : 255;
+  if(vsBg < th.change){ lastCapSig = cur; sawMotion = false; return; }   // back to empty table
+  if(vsLast < th.change){ sawMotion = false; return; }                   // same item still there
+  capture(cur);
+}
+function forceCapture(){ if(S.busy){ say("Still looking."); return; } capture(sig()); }
+
+function grabFrame(max, q){
+  const c = $("#cv"), w = vid.videoWidth, h = vid.videoHeight, s = Math.min(1, max / Math.max(w, h));
+  c.width = Math.round(w*s); c.height = Math.round(h*s);
+  c.getContext("2d").drawImage(vid, 0, 0, c.width, c.height);
+  return c.toDataURL("image/jpeg", q);
+}
+
+async function capture(curSig){
+  lastCapSig = curSig; sawMotion = false;
+  const full = grabFrame(896, 0.8);
+  const thumb = grabFrame(256, 0.65);
+  if(S.pending){ S.pending = null; }   // moved on without answering: that one is skipped
+  const item = {img: full.split(",")[1], thumb, size:"", result:null};
+  identify(item);
+}
+
+// ================= Claude =================
+function familyText(){ return S.people.map(p=>`- ${p.id}: ${p.name} — ${p.notes}`).join("\n"); }
+function loadText(){
+  const c = Object.entries(S.load.counts).filter(([,n])=>n>0).map(([id,n])=>`${id} ×${n}`).join(", ");
+  let t = c ? `Already sorted from this load: ${c}.` : "Nothing sorted from this load yet.";
+  if(S.load.mostly.length) t += ` The parent says this load is mostly: ${S.load.mostly.join(", ")}.`;
+  return t + " A load usually holds clothes from 1–2 people plus a few strays.";
+}
+function catalogText(){
+  if(!S.items.length) return "(none yet — judge by cut, style and size)";
+  return S.items.slice().sort((a,b)=>(a.created||0)-(b.created||0)).slice(-400).map(it=>
+    `${it.id} | ${it.person} | ${it.type||"?"} | ${it.colors||"?"} | size ${it.size||"?"} | ${(it.desc||"").slice(0,120)}`).join("\n");
+}
+const SYSTEM_RULES =
+`You help a parent sort clean laundry into piles, one per family member, by looking at a photo of ONE clothing item held up to the camera. Items may be inside out, crumpled, partly covered by hands, or have no tag. Answer fast and only in JSON.`;
+
+async function callClaude({model, images, text, maxTokens}){
+  const content = images.map(b64=>({type:"image", source:{type:"base64", media_type:"image/jpeg", data:b64}}));
+  content.push({type:"text", text});
+  const body = {
+    model, max_tokens: maxTokens || 700,
+    system: [
+      {type:"text", text: SYSTEM_RULES + "\n\nFAMILY (pile id: who — size guidance):\n" + familyText()},
+      {type:"text", text: "KNOWN ITEMS the parent already sorted (id | pile | type | colors | size | description):\n" + catalogText(), cache_control:{type:"ephemeral"}},
+    ],
+    messages: [{role:"user", content}],
+  };
+  const r = await fetch("https://api.anthropic.com/v1/messages", {
+    method:"POST",
+    headers:{"content-type":"application/json","x-api-key":S.key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+    body: JSON.stringify(body),
+  });
+  const j = await r.json().catch(()=>({}));
+  if(!r.ok){ const err = new Error(j?.error?.message || ("HTTP " + r.status)); err.status = r.status; throw err; }
+  addSpend(model, j.usage);
+  const out = (j.content||[]).filter(c=>c.type==="text").map(c=>c.text).join("\n");
+  return parseJSON(out);
+}
+function parseJSON(s){
+  try{ return JSON.parse(s); }catch(e){}
+  const f = s.match(/```(?:json)?\s*([\s\S]*?)```/); if(f){ try{ return JSON.parse(f[1]); }catch(e){} }
+  const a = s.indexOf("{"), b = s.lastIndexOf("}");
+  if(a >= 0 && b > a){ try{ return JSON.parse(s.slice(a, b+1)); }catch(e){} }
+  throw new Error("Bad JSON from model");
+}
+function addSpend(model, u){
+  if(!u) return; const p = PRICES[model] || PRICES["claude-haiku-5-5"];
+  const usd = ((u.input_tokens||0)*p.in + (u.output_tokens||0)*p.out + (u.cache_creation_input_tokens||0)*p.cw + (u.cache_read_input_tokens||0)*p.cr) / 1e6;
+  const k = monthKey(); S.spend[k] = (S.spend[k]||0) + usd; LS.set("spend", S.spend); renderCost();
+}
+function normalize(r){
+  r = (r && typeof r==="object") ? r : {};
+  const ids = new Set(S.people.map(p=>p.id));
+  r.ranking = (Array.isArray(r.ranking)?r.ranking:[]).filter(x=>x && ids.has(String(x.pile)))
+    .map(x=>({pile:String(x.pile), p:Math.max(0, Math.min(1, Number(x.p)||0))})).sort((a,b)=>b.p-a.p);
+  r.matches = (Array.isArray(r.matches)?r.matches:[]).map(String).filter(id=>S.items.some(x=>x.id===id));
+  for(const k of ["type","colors","desc","size_guess","reason","question","ask"]) r[k] = r[k]==null ? "" : String(r[k]);
+  r.no_item = !!r.no_item;
+  r.confident = !!r.confident && (r.ranking[0]?.p||0) >= 0.7;
+  return r;
+}
+
+async function identify(item){
+  S.busy = true; setPill("look", "Looking…");
+  const sizeLine = item.size ? `\nThe parent read the size tag as "${item.size}". Trust it; match against known items' sizes and the size guidance.` : "";
+  const prompt =
+`LOAD CONTEXT: ${loadText()}${sizeLine}
+
+Look at the photo. If no clothing item is clearly being shown (empty table, just hands, a blur), reply {"no_item":true}.
+Otherwise:
+1. Describe it: garment type, main colors, print/graphic, distinctive details, apparent size (adult/youth/toddler, rough size).
+2. List ids of KNOWN ITEMS it could be, best first (max 4). Identical designs may exist in different sizes for different kids — list all of them.
+3. Rank piles by probability (sum ≈ 1): women's vs men's vs girls' vs boys' cut, apparent size, known-item matches, load context as a prior.
+4. confident = true only if the top pile is ≥ 0.8 and clearly ahead; otherwise ask = "size" or "better_view", and question = a very short spoken question.
+
+Reply with only JSON:
+{"no_item":false,"type":"short-sleeve shirt","colors":"navy","desc":"navy tee, dinosaur graphic","size_guess":"2T","matches":[],"ranking":[{"pile":"b2","p":0.9},{"pile":"g4","p":0.1}],"confident":true,"reason":"toddler boy's dino tee","ask":"none","question":""}`;
+  try{
+    let r = normalize(await callClaude({model:S.model, images:[item.img], text:prompt}));
+    if(r.no_item){ S.busy = false; showIdle(); return; }
+
+    // Compare against look-alike items with their saved photos
+    const cands = r.matches.map(id=>S.items.find(x=>x.id===id)).filter(x=>x?.thumbs?.length).slice(0, 3);
+    const obvious = r.confident && cands.length===1 && cands[0].person===r.ranking[0]?.pile && r.ranking[0].p >= 0.9;
+    if(cands.length && !obvious){
+      const p2 =
+`LOAD CONTEXT: ${loadText()}${sizeLine}
+
+Image 1 is the NEW item. The next ${cands.length} image(s) are items sorted before, in order:
+${cands.map((it,i)=>`${i+1}. ${it.id} — pile ${it.person}, ${it.type}, ${it.colors}, size ${it.size||"unknown"}: ${it.desc}`).join("\n")}
+
+Is the new item the SAME design as one of these? Identical designs can belong to different kids in different sizes — if two references look the same but have different piles and the size isn't known, set confident false and ask "size". Rank the piles.
+Reply with only JSON: {"same_as":"<id or null>","ranking":[{"pile":"g6","p":0.7},{"pile":"g8","p":0.3}],"confident":false,"reason":"short","ask":"size","question":"What size is it?"}`;
+      try{
+        const r2 = normalize(await callClaude({model:S.model, images:[item.img, ...cands.map(it=>it.thumbs[it.thumbs.length-1].split(",")[1])], text:p2, maxTokens:400}));
+        if(r2.ranking.length){ r.ranking = r2.ranking; r.confident = r2.confident; r.reason = r2.reason || r.reason; r.ask = r2.ask; r.question = r2.question; }
+        const sa = r2.same_as && r2.same_as!=="null" ? String(r2.same_as) : null;
+        r.same_as = sa && S.items.some(x=>x.id===sa) ? sa : null;
+      }catch(e){}
+    }
+    // Optional: a second opinion from Sonnet when Haiku is unsure
+    if(!r.confident && S.escalate && S.model !== "claude-sonnet-5-5"){
+      try{ const r3 = normalize(await callClaude({model:"claude-sonnet-5-5", images:[item.img], text:prompt})); if(r3.ranking.length && !r3.no_item){ r3.matches = r3.matches.length ? r3.matches : r.matches; r3.same_as = r.same_as; r = r3; } }catch(e){}
+    }
+    item.result = r;
+    S.busy = false;
+    onResult(item);
+  }catch(e){
+    S.busy = false;
+    const msg = e.status===401 ? "The API key was rejected. Check it in settings." :
+                e.status===429 ? "Too many requests, or the spending limit was reached." :
+                e.status===529 || e.status===503 ? "Claude is busy right now. Try again in a moment." :
+                (e.message||"").includes("Failed to fetch") ? "No internet connection." : "Couldn't check that one.";
+    showBanner({tag:"Problem", who:"Try again", sub:msg, color:"#4a2420"});
+    say(msg);
+    setPill(S.paused ? "pause" : "watch", S.paused ? "Paused" : "Watching");
+  }
+}
+
+function onResult(item){
+  const r = item.result, top = r.ranking[0];
+  setPill(S.paused ? "pause" : "watch", S.paused ? "Paused" : "Watching");
+  if(!top){ showIdle(); return; }
+  if(r.confident){
+    S.pending = null;
+    commit(item, top.pile).then(entry=>{ S.last = entry; });
+    showBanner({tag:`${Math.round(top.p*100)}% sure · ${r.type}`, who:pname(top.pile), sub:r.reason, color:pcolor(top.pile)});
+    say(pname(top.pile));
+  } else {
+    S.pending = item;
+    const second = r.ranking[1];
+    const both = second ? `${pname(top.pile)} or ${pname(second.pile)}` : pname(top.pile);
+    const q = r.question || (r.ask==="better_view" ? "Show me the front." : "What size?");
+    showBanner({tag:"Not sure", who:both, sub:q + "  Say a name, “yes”, or “size …”", unsure:true});
+    say(`Not sure. ${both}. ${q}`);
+  }
+}
+async function commitPending(pile){
+  const item = S.pending; if(!item) return;
+  S.pending = null;
+  const guess = item.result?.ranking?.[0]?.pile;
+  S.last = await commit(item, pile);
+  showBanner({tag: guess===pile ? "Confirmed" : "Learned", who:pname(pile), sub:item.result?.type || "", color:pcolor(pile)});
+  say(guess===pile ? pname(pile) + "." : `Got it, ${pname(pile)}. I'll remember.`);
+}
+
+// ================= saving & learning =================
+function norm(s){ return String(s).toLowerCase().replace(/\s+/g,"").replace(/^size/,""); }
+async function commit(item, pile, forceNew){
+  const r = item.result || {};
+  let target = null;
+  if(!forceNew){
+    for(const id of [r.same_as, ...(r.matches||[])].filter(Boolean)){
+      const it = S.items.find(x=>x.id===id);
+      if(it && it.person===pile && (!item.size || !it.size || norm(it.size)===norm(item.size))){ target = it; break; }
+    }
+  }
+  let saved, created, prev = null;
+  if(target){
+    prev = JSON.parse(JSON.stringify(target));
+    const thumbs = (target.thumbs||[]).slice(-2); thumbs.push(item.thumb);
+    saved = {...target, seen:(target.seen||1)+1, thumbs, size:item.size || target.size || "", updated:Date.now()};
+    created = false;
+  } else {
+    saved = {id:uid(), person:pile, type:r.type||"", colors:r.colors||"", desc:r.desc||"", size:item.size||"",
+             sizeGuess:r.size_guess||"", thumbs:[item.thumb], seen:1, created:Date.now(), updated:Date.now()};
+    created = true;
+  }
+  await putItem(saved);
+  S.load.counts[pile] = (S.load.counts[pile]||0) + 1;
+  S.load.recent.unshift({id:saved.id, pile, thumb:item.thumb}); S.load.recent = S.load.recent.slice(0, 40);
+  LS.set("load", S.load); renderStrip();
+  return {item, pile, itemId:saved.id, created, prev, at:Date.now()};
+}
+async function revert(e){
+  if(e.created) await delItem(e.itemId); else if(e.prev) await putItem(e.prev);
+  S.load.counts[e.pile] = Math.max(0, (S.load.counts[e.pile]||1) - 1);
+  const i = S.load.recent.findIndex(x=>x.id===e.itemId); if(i>=0) S.load.recent.splice(i,1);
+  LS.set("load", S.load); renderStrip();
+}
+async function correctLast(pile){
+  const e = S.last; if(!e) return;
+  if(e.pile === pile){ say(pname(pile) + ", yes."); return; }
+  await revert(e);
+  S.last = await commit(e.item, pile);
+  showBanner({tag:"Fixed · learned", who:pname(pile), sub:e.item.result?.type || "", color:pcolor(pile)});
+  say(`Got it, ${pname(pile)}. I'll remember.`);
+}
+async function setLastSize(sz){
+  const e = S.last; if(!e) return;
+  const it = S.items.find(x=>x.id===e.itemId); if(it) await putItem({...it, size:sz, updated:Date.now()});
+  e.item.size = sz;
+}
+async function undo(){
+  if(S.pending){ S.pending = null; showIdle("Skipped"); say("Skipped."); return; }
+  const e = S.last; if(!e){ say("Nothing to undo."); return; }
+  await revert(e); S.last = null;
+  showIdle("Undone"); say("Undone. Hold it up again.");
+  lastCapSig = null; sawMotion = true;
+}
+function newLoad(){ S.load = {counts:{}, mostly:[], recent:[]}; LS.set("load", S.load); S.last = null; S.pending = null; renderStrip(); showIdle("New load"); say("New load. Who's mostly in it?"); }
+function setPaused(p){
+  S.paused = p; $("#pauseBtn").textContent = p ? "Resume" : "Pause";
+  setPill(p ? "pause" : "watch", p ? "Paused" : "Watching");
+  say(p ? "Paused." : "Watching.");
+  if(!p){ sawMotion = true; }
+}
+
+// ================= UI =================
+function setPill(cls, txt){ const p = $("#pill"); p.className = "pill " + cls; $("#pillTxt").textContent = txt; }
+function showBanner({tag, who, sub, color, unsure}){
+  const b = $("#banner");
+  b.classList.toggle("unsure", !!unsure);
+  b.style.background = unsure ? "" : (color || "#1f1a17");
+  $("#bTag").textContent = tag || ""; $("#bWho").textContent = who || ""; $("#bSub").textContent = sub || "";
+}
+function showIdle(tag){ showBanner({tag: tag || "Ready", who:"Hold up an item", sub:"It looks when the item holds still."}); }
+function renderStrip(){
+  $("#strip").innerHTML = S.load.recent.map(x=>`<div><img src="${x.thumb}" style="border-color:${pcolor(x.pile)}" alt="">${esc(pname(x.pile))}</div>`).join("");
+}
+function renderCost(){ const v = S.spend[monthKey()]||0; $("#cost").textContent = "$" + v.toFixed(v < 1 ? 3 : 2) + " this month"; }
+function renderPileBtns(){
+  $("#pileBtns").innerHTML = S.people.map(p=>`<button style="background:${p.color}" data-pile="${p.id}">${esc(p.name)}</button>`).join("");
+}
+function renderSetup(){
+  $("#keyIn").value = S.key; $("#modelIn").value = S.model; $("#escIn").checked = S.escalate; $("#sensIn").value = S.sens;
+  $("#famList").innerHTML = S.people.map(p=>`<div class="fam"><span class="sw" style="background:${p.color}"></span><div>
+    <input data-fam="${p.id}" data-k="name" value="${esc(p.name)}"><input data-fam="${p.id}" data-k="notes" value="${esc(p.notes)}"></div></div>`).join("");
+  $("#nItems").textContent = S.items.length;
+  $("#closetGrid").innerHTML = S.items.slice().sort((a,b)=>(b.updated||0)-(a.updated||0)).slice(0, 80).map(it=>
+    `<div><img src="${it.thumbs?.[it.thumbs.length-1]||""}" style="border-color:${pcolor(it.person)}" alt="">${esc(pname(it.person))}${it.size?" · "+esc(it.size):""}</div>`).join("");
+  const v = S.spend[monthKey()]||0;
+  $("#spendLine").textContent = `API spend tracked on this phone this month: $${v.toFixed(3)}`;
+}
+function readSetup(){
+  S.key = $("#keyIn").value.trim(); S.model = $("#modelIn").value; S.escalate = $("#escIn").checked; S.sens = Number($("#sensIn").value);
+  document.querySelectorAll("[data-fam]").forEach(inp=>{ const p = person(inp.dataset.fam); if(p && inp.value.trim()) p[inp.dataset.k] = inp.value.trim(); });
+  LS.set("key", S.key); LS.set("model", S.model); LS.set("escalate", S.escalate); LS.set("sens", S.sens); LS.set("people", S.people);
+}
+
+let wakeLock = null;
+async function keepAwake(){ try{ wakeLock = await navigator.wakeLock?.request("screen"); }catch(e){} }
+document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="visible" && S.running){ keepAwake(); if(listenWanted && !recActive) try{ rec.start(); }catch(e){} } });
+
+async function start(){
+  readSetup();
+  $("#setupErr").textContent = "";
+  if(!/^sk-ant-/.test(S.key)){ $("#setupErr").textContent = "Paste your Anthropic API key first (it starts with sk-ant-)."; return; }
+  // Unlock speech inside the tap
+  try{ const u = new SpeechSynthesisUtterance(" "); u.volume = 0; speechSynthesis.speak(u); }catch(e){}
+  try{ await startCamera(); }
+  catch(e){ $("#setupErr").textContent = "Couldn't open the camera. Allow camera access for this site and try again."; return; }
+  $("#setup").classList.add("hidden"); $("#live").classList.remove("hidden");
+  S.running = true; S.paused = false;
+  renderPileBtns(); renderStrip(); renderCost(); showIdle();
+  keepAwake();
+  startListening();
+  setTimeout(()=>{ setBackground(); sawMotion = false; }, 900);
+  clearInterval(loopTimer); loopTimer = setInterval(tick, 130);
+  say("Ready. Show me the empty spot for a second, then hold up the first item.");
+}
+function openSettings(){
+  S.running = false; clearInterval(loopTimer); stopListening();
+  try{ vid.srcObject?.getTracks().forEach(t=>t.stop()); }catch(e){}
+  try{ wakeLock?.release(); }catch(e){}
+  $("#live").classList.add("hidden"); $("#setup").classList.remove("hidden");
+  renderSetup();
+}
+
+// events
+$("#startBtn").onclick = start;
+$("#setBtn").onclick = openSettings;
+$("#scanBtn").onclick = forceCapture;
+$("#undoBtn").onclick = undo;
+$("#pauseBtn").onclick = ()=>setPaused(!S.paused);
+$("#pileBtns").onclick = e=>{ const b = e.target.closest("[data-pile]"); if(!b) return; if(S.pending) commitPending(b.dataset.pile); else if(S.last) correctLast(b.dataset.pile); };
+$("#exportBtn").onclick = ()=>{
+  const data = JSON.stringify({version:1, people:S.people, items:S.items});
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([data], {type:"application/json"}));
+  a.download = "laundry-closet-" + new Date().toISOString().slice(0,10) + ".json"; a.click();
+};
+$("#importIn").onchange = async e=>{
+  const f = e.target.files[0]; if(!f) return;
+  try{
+    const d = JSON.parse(await f.text());
+    if(Array.isArray(d.people)){ S.people = d.people; LS.set("people", S.people); }
+    for(const it of (d.items||[])) if(it && it.id && it.person) await putItem(it);
+    renderSetup(); alert("Restored " + (d.items||[]).length + " items.");
+  }catch(err){ alert("That file couldn't be read."); }
+  e.target.value = "";
+};
+$("#wipeBtn").onclick = async ()=>{
+  if(!confirm("Forget every item it has learned?")) return;
+  for(const it of S.items.slice()) await dbDel(it.id);
+  S.items = []; renderSetup();
+};
+
+(async function init(){
+  try{ await openDB(); S.items = await dbAll(); }catch(e){}
+  $("#setup").classList.remove("hidden");
+  renderSetup();
+  if(!navigator.mediaDevices?.getUserMedia) $("#setupErr").textContent = "This browser can't use the camera. Open the page in Safari (iPhone) or Chrome (Android).";
+})();
+</script>
+</body>
+</html>
