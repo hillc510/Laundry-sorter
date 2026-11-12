@@ -92,7 +92,7 @@ a{color:#7fd3ca}
 
   <div class="card">
     <h2 style="margin-top:0">Piles</h2>
-    <p style="margin:0">Rename to your kids' names if you like — then you can say their names out loud.</p>
+    <p style="margin:0">Top box: the name you'll <b>say and see</b> — it stays on this phone and is never sent to Claude. Bottom box: the age/size description Claude uses — don't put names there.</p>
     <div id="famList"></div>
   </div>
 
@@ -374,12 +374,12 @@ async function interpretWithClaude(alts){
   interpreting = true;
   const prompt =
 `A parent is sorting laundry hands-free and spoke to the app. Speech recognition may have misheard. Its guesses, best first:
-${alts.map(a=>`- "${a}"`).join("\n")}
+${alts.map(a=>`- "${redact(a)}"`).join("\n")}
 
-The app had just said: "${S.lastSpoken}"
+The app had just said: "${redact(S.lastSpoken)}"
 ${S.pending ? "The app is waiting for the parent to say whose item it is, or its size." : "The parent may be correcting whose pile the last item belongs to."}
 
-Piles: ${S.people.map(p=>`${p.id} = "${p.name}"`).join(", ")}
+Piles (id: who): ${S.people.map(p=>`${p.id}: ${redact(p.notes)}`).join(" | ")}
 
 What did the parent most likely mean? Reply with only JSON, one of:
 {"cmd":"pile","pile":"<pile id>"} {"cmd":"size","size":"7"} {"cmd":"yes"} {"cmd":"undo"} {"cmd":"skip"} {"cmd":"none"}
@@ -466,7 +466,29 @@ async function capture(curSig){
 }
 
 // ================= Claude =================
-function familyText(){ return S.people.map(p=>`- ${p.id}: ${p.name} — ${p.notes}`).join("\n"); }
+// Names never leave the phone: Claude only sees pile ids and the size descriptions
+function familyText(){ return S.people.map(p=>`- ${p.id}: ${redact(p.notes)}`).join("\n"); }
+function redact(text){
+  let t = String(text||"");
+  for(const p of S.people){
+    const n = p.name.trim(); if(!n) continue;
+    const esc_ = n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    t = t.replace(new RegExp(esc_, "gi"), `[pile ${p.id}]`);
+    const first = n.split(/\s+/)[0];
+    if(first.length > 2 && !/^(girl|boy|mom|dad)$/i.test(first)) t = t.replace(new RegExp("\\b" + first.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b", "gi"), `[pile ${p.id}]`);
+  }
+  // Also catch misheard spellings of a name ("Abigale" for "Abigail")
+  const firsts = S.people.map(p=>[p.id, p.name.trim().split(/\s+/)[0].toLowerCase()]).filter(([,f])=>f.length > 3 && !/^(girl|boy|mom|dad)$/.test(f));
+  t = t.replace(/[A-Za-z']{3,}/g, w=>{ for(const [id, f] of firsts){ if(editDist(w.toLowerCase(), f) <= (f.length > 5 ? 2 : 1)) return `[pile ${id}]`; } return w; });
+  return t;
+}
+function editDist(a, b){
+  const d = Array.from({length:a.length+1}, (_, i)=>[i]);
+  for(let j=1; j<=b.length; j++) d[0][j] = j;
+  for(let i=1; i<=a.length; i++) for(let j=1; j<=b.length; j++)
+    d[i][j] = Math.min(d[i-1][j]+1, d[i][j-1]+1, d[i-1][j-1] + (a[i-1]===b[j-1] ? 0 : 1));
+  return d[a.length][b.length];
+}
 function loadText(){
   const c = Object.entries(S.load.counts).filter(([,n])=>n>0).map(([id,n])=>`${id} ×${n}`).join(", ");
   let t = c ? `Already sorted from this load: ${c}.` : "Nothing sorted from this load yet.";
