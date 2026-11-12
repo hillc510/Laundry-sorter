@@ -31,6 +31,7 @@ a{color:#7fd3ca}
 #live{position:fixed;inset:0;display:flex;flex-direction:column;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
 .stage{position:relative;flex:1;min-height:0;background:#000;overflow:hidden}
 .stage video{width:100%;height:100%;object-fit:cover}
+.stage video.mirror{transform:scaleX(-1)}
 .pill{position:absolute;top:10px;left:10px;background:rgba(0,0,0,.6);padding:7px 11px;border-radius:999px;font-weight:800;font-size:14px;display:flex;align-items:center;gap:7px}
 .pill .d{width:10px;height:10px;border-radius:50%;background:#888}
 .pill.watch .d{background:#3aa197}.pill.look .d{background:#f0b429;animation:bl 1s infinite}.pill.pause .d{background:#888}
@@ -80,6 +81,8 @@ a{color:#7fd3ca}
       <option value="claude-sonnet-5-5">Sonnet 5.5 — smarter (≈ $10–30 per 1,000 items)</option>
     </select>
     <label class="row" style="margin-top:10px;font-size:14px;gap:10px"><input id="escIn" type="checkbox" style="width:auto"> Ask Sonnet only when Haiku is unsure</label>
+    <label class="f">Camera</label>
+    <select id="facingIn"><option value="user">Front camera (facing you)</option><option value="environment">Back camera</option></select>
     <label class="f">Detection sensitivity</label>
     <input id="sensIn" type="range" min="1" max="10" value="5" style="padding:0">
   </div>
@@ -131,7 +134,7 @@ a{color:#7fd3ca}
   <div class="heard" id="heard"></div>
   <div class="strip" id="strip"></div>
   <div class="controls">
-    <button id="scanBtn">Look now</button><button id="undoBtn">Undo</button><button id="pauseBtn">Pause</button><button id="setBtn">⚙︎</button>
+    <button id="scanBtn">Look now</button><button id="flipBtn">Flip</button><button id="undoBtn">Undo</button><button id="pauseBtn">Pause</button><button id="setBtn">⚙︎</button>
   </div>
   <div class="piles" id="pileBtns"></div>
 </div>
@@ -164,7 +167,7 @@ const LS = {
 };
 const S = {
   key: LS.get("key", ""), model: LS.get("model", "claude-haiku-5-5"), escalate: LS.get("escalate", false),
-  sens: LS.get("sens", 5),
+  sens: LS.get("sens", 5), facing: LS.get("facing", "user"),
   people: LS.get("people", DEFAULT_PEOPLE),
   items: [],
   load: LS.get("load", {counts:{}, mostly:[], recent:[]}),
@@ -327,8 +330,10 @@ const actx = ana.getContext("2d", {willReadFrequently:true});
 let prevSig = null, bgSig = null, lastCapSig = null, stableSince = 0, armed = true, loopTimer = null, sawMotion = true;
 
 async function startCamera(){
-  const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"}, width:{ideal:1280}, height:{ideal:960}}, audio:false});
+  const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:S.facing}, width:{ideal:1280}, height:{ideal:960}}, audio:false});
+  try{ vid.srcObject?.getTracks().forEach(t=>t.stop()); }catch(e){}
   vid.srcObject = stream;
+  vid.classList.toggle("mirror", S.facing==="user");
   await vid.play().catch(()=>{});
   await new Promise(r=>{ if(vid.videoWidth) r(); else vid.onloadedmetadata = r; setTimeout(r, 3000); });
 }
@@ -612,7 +617,7 @@ function renderPileBtns(){
   $("#pileBtns").innerHTML = S.people.map(p=>`<button style="background:${p.color}" data-pile="${p.id}">${esc(p.name)}</button>`).join("");
 }
 function renderSetup(){
-  $("#keyIn").value = S.key; $("#modelIn").value = S.model; $("#escIn").checked = S.escalate; $("#sensIn").value = S.sens;
+  $("#keyIn").value = S.key; $("#facingIn").value = S.facing; $("#modelIn").value = S.model; $("#escIn").checked = S.escalate; $("#sensIn").value = S.sens;
   $("#famList").innerHTML = S.people.map(p=>`<div class="fam"><span class="sw" style="background:${p.color}"></span><div>
     <input data-fam="${p.id}" data-k="name" value="${esc(p.name)}"><input data-fam="${p.id}" data-k="notes" value="${esc(p.notes)}"></div></div>`).join("");
   $("#nItems").textContent = S.items.length;
@@ -622,7 +627,7 @@ function renderSetup(){
   $("#spendLine").textContent = `API spend tracked on this phone this month: $${v.toFixed(3)}`;
 }
 function readSetup(){
-  S.key = $("#keyIn").value.trim(); S.model = $("#modelIn").value; S.escalate = $("#escIn").checked; S.sens = Number($("#sensIn").value);
+  S.key = $("#keyIn").value.trim(); S.facing = $("#facingIn").value; LS.set("facing", S.facing); S.model = $("#modelIn").value; S.escalate = $("#escIn").checked; S.sens = Number($("#sensIn").value);
   document.querySelectorAll("[data-fam]").forEach(inp=>{ const p = person(inp.dataset.fam); if(p && inp.value.trim()) p[inp.dataset.k] = inp.value.trim(); });
   LS.set("key", S.key); LS.set("model", S.model); LS.set("escalate", S.escalate); LS.set("sens", S.sens); LS.set("people", S.people);
 }
@@ -660,6 +665,11 @@ function openSettings(){
 $("#startBtn").onclick = start;
 $("#setBtn").onclick = openSettings;
 $("#scanBtn").onclick = forceCapture;
+$("#flipBtn").onclick = async ()=>{
+  S.facing = S.facing==="user" ? "environment" : "user"; LS.set("facing", S.facing);
+  try{ await startCamera(); setTimeout(()=>{ setBackground(); sawMotion = false; }, 900); say(S.facing==="user" ? "Front camera." : "Back camera."); }
+  catch(e){ say("Couldn't switch cameras."); }
+};
 $("#undoBtn").onclick = undo;
 $("#pauseBtn").onclick = ()=>setPaused(!S.paused);
 $("#pileBtns").onclick = e=>{ const b = e.target.closest("[data-pile]"); if(!b) return; if(S.pending) commitPending(b.dataset.pile); else if(S.last) correctLast(b.dataset.pile); };
