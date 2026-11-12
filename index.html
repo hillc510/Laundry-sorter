@@ -81,6 +81,9 @@ a{color:#7fd3ca}
       <option value="claude-sonnet-5-5">Sonnet 5.5 — smarter (≈ $10–30 per 1,000 items)</option>
     </select>
     <label class="row" style="margin-top:10px;font-size:14px;gap:10px"><input id="escIn" type="checkbox" style="width:auto"> Ask Sonnet only when Haiku is unsure</label>
+    <label class="f">Voice</label>
+    <div class="row"><select id="voiceIn"></select><button class="btn ghost small" id="testVoice" type="button">Test</button></div>
+    <p style="margin:6px 0 0">★ = natural-sounding. On iPhone, download better voices free: Settings → Accessibility → Spoken Content → Voices → English → pick one marked <b>Premium</b> or <b>Enhanced</b> (e.g. Ava, Zoe, Evan). Then reopen this page.</p>
     <label class="f">Camera</label>
     <select id="facingIn"><option value="user">Front camera (facing you)</option><option value="environment">Back camera</option></select>
     <label class="f">Detection sensitivity</label>
@@ -204,11 +207,30 @@ async function delItem(id){ S.items = S.items.filter(x=>x.id!==id); await dbDel(
 // ================= speech out =================
 let speakingUntil = 0, voice = null, holdMic = false;
 const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform==="MacIntel" && navigator.maxTouchPoints > 1);
+// Rank voices so the most natural one on this device is used
+function voiceScore(v){
+  let sc = 0;
+  if(/^en[-_]US/i.test(v.lang)) sc += 3; else if(/^en/i.test(v.lang)) sc += 1; else return -99;
+  if(/premium/i.test(v.name)) sc += 10;
+  if(/enhanced/i.test(v.name)) sc += 8;
+  if(/natural|neural|online/i.test(v.name)) sc += 8;
+  if(/google us english/i.test(v.name)) sc += 6;
+  if(/\b(ava|zoe|evan|nathan|joelle|noelle|samantha|allison|susan|tom|aria|jenny|guy)\b/i.test(v.name)) sc += 2;
+  if(/compact|eloquence|novelty|bad news|bells|boing|bubbles|cellos|jester|organ|superstar|trinoids|whisper|wobble|zarvox|albert|fred|junior|ralph|kathy|grandma|grandpa|rocko|shelley|sandy|flo|reed/i.test(v.name)) sc -= 12;
+  return sc;
+}
+function englishVoices(){ return speechSynthesis.getVoices().filter(v=>voiceScore(v) > -50).sort((a,b)=>voiceScore(b)-voiceScore(a)); }
 function pickVoice(){
-  const vs = speechSynthesis.getVoices();
-  voice = vs.find(v=>/en-US/i.test(v.lang) && /samantha|google us|aria|jenny|ava/i.test(v.name)) || vs.find(v=>/^en/i.test(v.lang)) || null;
+  const vs = englishVoices(), want = LS.get("voiceName", "");
+  voice = vs.find(v=>v.name===want) || vs[0] || null;
+  if(!$("#setup").classList.contains("hidden")) renderVoices();
 }
 if("speechSynthesis" in window){ pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
+function renderVoices(){
+  const sel = $("#voiceIn"); if(!sel || !("speechSynthesis" in window)) return;
+  const vs = englishVoices();
+  sel.innerHTML = vs.map(v=>`<option value="${esc(v.name)}" ${voice && v.name===voice.name ? "selected" : ""}>${esc(v.name)}${voiceScore(v) >= 10 ? " ★" : ""}</option>`).join("") || "<option>Default voice</option>";
+}
 function say(text){
   if(!text || !("speechSynthesis" in window)) return;
   S.lastSpoken = text;
@@ -216,7 +238,7 @@ function say(text){
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     if(voice) u.voice = voice;
-    u.rate = 1.08; u.lang = "en-US";
+    u.rate = 1.0; u.pitch = 1.0; u.lang = voice?.lang || "en-US";
     speakingUntil = Date.now() + 600 + text.length * 75;
     // iPhones route speech quietly while the mic is open, so pause listening while talking
     if(IS_IOS && recActive){ holdMic = true; try{ rec.abort(); }catch(e){} }
@@ -233,11 +255,13 @@ function startListening(){
   listenWanted = true;
   if(!rec){
     rec = new SR();
-    rec.continuous = true; rec.interimResults = false; rec.lang = "en-US"; rec.maxAlternatives = 1;
+    rec.continuous = true; rec.interimResults = true; rec.lang = "en-US"; rec.maxAlternatives = 5;
     rec.onstart = () => { recActive = true; setMic("🎙 listening", true); };
     rec.onresult = e => {
       for(let i = e.resultIndex; i < e.results.length; i++){
-        if(e.results[i].isFinal) onHeard(e.results[i][0].transcript);
+        const res = e.results[i];
+        if(res.isFinal) onHeard(Array.from(res).map(x=>x.transcript));
+        else if(res[0]?.transcript) $("#heard").textContent = "Hearing: " + res[0].transcript + "…";
       }
     };
     rec.onerror = e => {
@@ -256,9 +280,9 @@ function similar(a, b){
   let n = 0; wa.forEach(w=>{ if(wb.has(w)) n++; });
   return n / wa.size > 0.7;
 }
-function onHeard(raw){
-  const text = raw.trim(); if(!text) return;
-  // Ignore our own voice coming back through the mic
+function onHeard(alts){
+  alts = alts.map(a=>String(a||"").trim()).filter(Boolean);
+  const text = alts[0]; if(!text) return;
   // Ignore our own voice coming back through the mic: a long phrase matching what we just said,
   // or an exact repeat of it while we're still talking. Short answers ("girl eight") always count.
   const words = (text.match(/[a-z0-9']+/gi)||[]).length;
@@ -266,7 +290,24 @@ function onHeard(raw){
   if(words >= 4 && similar(text, S.lastSpoken)) return;
   if(Date.now() < speakingUntil && normT === normS) return;
   $("#heard").textContent = "Heard: “" + text + "”";
-  handleCommand(text);
+  // Try every guess the recognizer offered, best first
+  for(const a of alts){ if(handleCommand(a)) return; }
+  // Nothing matched: ask Haiku what was probably meant (only short phrases, only when something is waiting on an answer or was just sorted)
+  if(words <= 10 && (S.pending || S.last)) interpretWithClaude(alts);
+}
+
+// Words speech recognition commonly mishears
+const SOUNDALIKE = [
+  [/\b(ate|eighth|hate|eat)\b/g, "eight"], [/\b(sicks|sics|sex|sick|sis|six's)\b/g, "six"],
+  [/\b(fore|four's)\b/g, "four"], [/\b(tin|tan|10's)\b/g, "ten"], [/\b(too|tu)\b/g, "two"],
+  [/\b(grill|grilled|curl|gurl|girls|gal|go girl)\b/g, "girl"], [/\b(boys|bowie|buoy)\b/g, "boy"],
+  [/\b(mum|mama|ma'am|mom's)\b/g, "mom"], [/\b(dead|dads|data)\b(?=\s*$)/g, "dad"],
+  [/\b(yes sir|yup|uh huh|yah|ya|sure|yes yes)\b/g, "yes"],
+];
+function cleanup(raw){
+  let t = " " + raw.toLowerCase().replace(/[.,!?"]/g, " ").replace(/\s+/g, " ").trim() + " ";
+  for(const [re, w] of SOUNDALIKE) t = t.replace(re, w);
+  return t.replace(/\s+/g, " ").trim();
 }
 
 const WORDNUM = {one:"1",two:"2",three:"3",four:"4",five:"5",six:"6",seven:"7",eight:"8",ten:"10",twelve:"12",fourteen:"14",sixteen:"16",eighteen:"18"};
@@ -277,49 +318,81 @@ function pileFromWords(t){
   }
   // first names alone ("Abigail"), or common words
   for(const p of S.people){ const first = p.name.toLowerCase().split(/\s+/)[0]; if(first.length > 3 && !/^(girl|boy)$/.test(first) && new RegExp("\\b"+first+"\\b").test(t)) return p.id; }
-  if(/\b(mom|mom's|moms|mommy|mother|wife|christa)\b/.test(t)) return "mom";
-  if(/\b(dad|dad's|dads|daddy|father|husband|mine)\b/.test(t)) return "dad";
-  if(/\b(boy|boy's|baby|toddler|son)\b/.test(t)) return "b2";
+  if(/\b(mom|mommy|mother|wife|christa)\b/.test(t)) return "mom";
+  if(/\b(dad|daddy|father|husband|mine)\b/.test(t)) return "dad";
+  if(/\b(boy|baby|toddler|son)\b/.test(t)) return "b2";
   if(/\b(ten|10)\b/.test(t)) return "g10";
   if(/\b(eight|8)\b/.test(t)) return "g8";
   if(/\b(six|6)\b/.test(t)) return "g6";
-  if(/\b(four|4|for)\b/.test(t) && /\b(girl|four|4)\b/.test(t)) return "g4";
+  if(/\b(four|4)\b/.test(t) || (/\bfor\b/.test(t) && /\bgirl\b/.test(t))) return "g4";
   if(/\b(two|2)\b/.test(t)) return "b2";
   return null;
 }
+// Returns true if the phrase was understood
 function handleCommand(raw){
-  const t = raw.toLowerCase().replace(/[.,!?]/g, " ").replace(/\s+/g, " ").trim();
-  if(/\b(pause|stop watching|hold on|wait)\b/.test(t)){ setPaused(true); return; }
-  if(/\b(resume|unpause|keep going|start again|continue)\b/.test(t)){ setPaused(false); return; }
-  if(/\bnew load\b/.test(t)){ newLoad(); return; }
-  if(/\b(undo|go back)\b/.test(t)){ undo(); return; }
-  if(/\b(repeat|say again|say that again|what did you say|what was that)\b/.test(t)){ say(S.lastSpoken || "Nothing yet."); return; }
-  if(/\b(empty|background|clear table)\b/.test(t)){ setBackground(); say("Got the empty spot."); return; }
+  const t = cleanup(raw);
+  if(/\b(pause|stop watching|hold on)\b/.test(t)){ setPaused(true); return true; }
+  if(/\b(resume|unpause|keep going|start again|continue)\b/.test(t)){ setPaused(false); return true; }
+  if(/\bnew load\b/.test(t)){ newLoad(); return true; }
+  if(/\b(undo|go back)\b/.test(t)){ undo(); return true; }
+  if(/\b(repeat|say again|say that again|what did you say|what was that)\b/.test(t)){ say(S.lastSpoken || "Nothing yet."); return true; }
+  if(/\b(empty|background|clear table)\b/.test(t)){ setBackground(); say("Got the empty spot."); return true; }
   if(/\bmostly\b/.test(t)){
     const ids = []; for(const part of t.split(/\band\b|,/)){ const p = pileFromWords(part); if(p && !ids.includes(p)) ids.push(p); }
+    if(!ids.length) return false;
     S.load.mostly = ids; LS.set("load", S.load);
-    say(ids.length ? "OK. Mostly " + ids.map(pname).join(" and ") + "." : "Sorry, who?"); return;
+    say("OK. Mostly " + ids.map(pname).join(" and ") + "."); return true;
   }
-  if(/\b(skip)\b/.test(t)){ if(S.pending){ S.pending = null; showIdle("Skipped"); say("Skipped."); } return; }
-  if(/\b(next|look|scan|check this|what about this|this one|go)\b/.test(t) && !pileFromWords(t)){ forceCapture(); return; }
+  if(/\b(skip)\b/.test(t)){ if(S.pending){ S.pending = null; showIdle("Skipped"); say("Skipped."); } return true; }
+  if(/\b(next|look|scan|check this|what about this|this one)\b/.test(t) && !pileFromWords(t)){ forceCapture(); return true; }
 
   let m = t.match(/\bsize (?:is )?([a-z0-9\/\-]+)(?: ?(t|x))?\b/);
   if(m){
     let sz = WORDNUM[m[1]] || m[1]; if(m[2]) sz += m[2];
-    sz = sz.toUpperCase();
-    if(S.pending){ S.pending.size = sz; say("Size " + sz + ". Checking."); identify(S.pending); }
-    else if(S.last){ setLastSize(sz); say("Saved size " + sz + "."); }
-    return;
+    applySize(sz.toUpperCase()); return true;
   }
   if(/\b(yes|yep|yeah|correct|right|ok|okay|good|that's right)\b/.test(t) && !pileFromWords(t)){
     if(S.pending){ const top = S.pending.result?.ranking?.[0]; if(top) commitPending(top.pile); }
-    return;
+    return true;
   }
   const pile = pileFromWords(t);
-  if(pile){
-    if(S.pending) commitPending(pile);
-    else if(S.last) correctLast(pile);
-  }
+  if(pile){ applyPile(pile); return true; }
+  return false;
+}
+function applySize(sz){
+  if(S.pending){ S.pending.size = sz; say("Size " + sz + ". Checking."); identify(S.pending); }
+  else if(S.last){ setLastSize(sz); say("Saved size " + sz + "."); }
+}
+function applyPile(pile){
+  if(S.pending) commitPending(pile);
+  else if(S.last) correctLast(pile);
+}
+
+let interpreting = false;
+async function interpretWithClaude(alts){
+  if(interpreting || !S.key) return;
+  interpreting = true;
+  const prompt =
+`A parent is sorting laundry hands-free and spoke to the app. Speech recognition may have misheard. Its guesses, best first:
+${alts.map(a=>`- "${a}"`).join("\n")}
+
+The app had just said: "${S.lastSpoken}"
+${S.pending ? "The app is waiting for the parent to say whose item it is, or its size." : "The parent may be correcting whose pile the last item belongs to."}
+
+Piles: ${S.people.map(p=>`${p.id} = "${p.name}"`).join(", ")}
+
+What did the parent most likely mean? Reply with only JSON, one of:
+{"cmd":"pile","pile":"<pile id>"} {"cmd":"size","size":"7"} {"cmd":"yes"} {"cmd":"undo"} {"cmd":"skip"} {"cmd":"none"}
+Use "none" if it was probably just talk not meant for the app.`;
+  try{
+    const r = await callText(prompt);
+    if(r?.cmd==="pile" && person(String(r.pile))) applyPile(String(r.pile));
+    else if(r?.cmd==="size" && r.size) applySize(String(r.size).toUpperCase());
+    else if(r?.cmd==="yes"){ if(S.pending){ const top = S.pending.result?.ranking?.[0]; if(top) commitPending(top.pile); } }
+    else if(r?.cmd==="undo") undo();
+    else if(r?.cmd==="skip"){ if(S.pending){ S.pending = null; showIdle("Skipped"); say("Skipped."); } }
+  }catch(e){}
+  interpreting = false;
 }
 
 // ================= camera & detection =================
@@ -430,6 +503,18 @@ async function callClaude({model, images, text, maxTokens}){
   const out = (j.content||[]).filter(c=>c.type==="text").map(c=>c.text).join("\n");
   return parseJSON(out);
 }
+async function callText(text){
+  const model = "claude-haiku-5-5";
+  const r = await fetch("https://api.anthropic.com/v1/messages", {
+    method:"POST",
+    headers:{"content-type":"application/json","x-api-key":S.key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+    body: JSON.stringify({model, max_tokens:200, messages:[{role:"user", content:text}]}),
+  });
+  const j = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(j?.error?.message || ("HTTP " + r.status));
+  addSpend(model, j.usage);
+  return parseJSON((j.content||[]).filter(c=>c.type==="text").map(c=>c.text).join("\n"));
+}
 function parseJSON(s){
   try{ return JSON.parse(s); }catch(e){}
   const f = s.match(/```(?:json)?\s*([\s\S]*?)```/); if(f){ try{ return JSON.parse(f[1]); }catch(e){} }
@@ -519,7 +604,8 @@ function onResult(item){
     S.pending = null;
     commit(item, top.pile).then(entry=>{ S.last = entry; });
     showBanner({tag:`${Math.round(top.p*100)}% sure · ${r.type}`, who:pname(top.pile), sub:r.reason, color:pcolor(top.pile)});
-    say(pname(top.pile));
+    const n = pname(top.pile);
+    say(n + ".");
   } else {
     S.pending = item;
     const second = r.ranking[1];
@@ -617,7 +703,7 @@ function renderPileBtns(){
   $("#pileBtns").innerHTML = S.people.map(p=>`<button style="background:${p.color}" data-pile="${p.id}">${esc(p.name)}</button>`).join("");
 }
 function renderSetup(){
-  $("#keyIn").value = S.key; $("#facingIn").value = S.facing; $("#modelIn").value = S.model; $("#escIn").checked = S.escalate; $("#sensIn").value = S.sens;
+  $("#keyIn").value = S.key; $("#facingIn").value = S.facing; renderVoices(); $("#modelIn").value = S.model; $("#escIn").checked = S.escalate; $("#sensIn").value = S.sens;
   $("#famList").innerHTML = S.people.map(p=>`<div class="fam"><span class="sw" style="background:${p.color}"></span><div>
     <input data-fam="${p.id}" data-k="name" value="${esc(p.name)}"><input data-fam="${p.id}" data-k="notes" value="${esc(p.notes)}"></div></div>`).join("");
   $("#nItems").textContent = S.items.length;
@@ -665,6 +751,8 @@ function openSettings(){
 $("#startBtn").onclick = start;
 $("#setBtn").onclick = openSettings;
 $("#scanBtn").onclick = forceCapture;
+$("#voiceIn").onchange = ()=>{ LS.set("voiceName", $("#voiceIn").value); pickVoice(); };
+$("#testVoice").onclick = ()=>{ LS.set("voiceName", $("#voiceIn").value); pickVoice(); say("Not sure. Girl six or Girl eight. What size?"); };
 $("#flipBtn").onclick = async ()=>{
   S.facing = S.facing==="user" ? "environment" : "user"; LS.set("facing", S.facing);
   try{ await startCamera(); setTimeout(()=>{ setBackground(); sawMotion = false; }, 900); say(S.facing==="user" ? "Front camera." : "Back camera."); }
